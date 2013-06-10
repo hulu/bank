@@ -39,7 +39,7 @@ The second approach aims at reducing the number of UDP packages transmitted by t
 
 * Many packets of "Gauge" data type are aggregated into one packet with the one latest value:
 
-        "api_queue_size:30|g" + "api_queue_size:25|g" => "hulu_api_queue_size:25|g"
+        "api_queue_size:30|g" + "api_queue_size:25|g" => "api_queue_size:25|g"
 
 * Data with sample rate are sampled locally:
         
@@ -54,8 +54,8 @@ The second approach aims at reducing the number of UDP packages transmitted by t
 * Can be used as the frontend of both Statsd and Metricsd because it respects both protocols.
 * Respects "delete". 
 
-        "hulu_api:delete|h" => discard current histogram data of hulu_api
-                            => send "hulu_api:delete|h" to downstream.
+        "api:delete|h" => discard current histogram data of api
+                            => send "api:delete|h" to downstream.
 * Can parse packets that are already aggregated
 * Consistent hashing for downstream
 
