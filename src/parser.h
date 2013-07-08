@@ -44,7 +44,7 @@ Saving *get_new_saving();
 
 SavingValue get_new_savingvalue();
 
-void save(char *value, char *type, Account *acct);
+void save(char *value, char *type, char *sample_rate, Account *acct);
 
 PointerContainer *withdraw(Node *root, const int size_limit);
 

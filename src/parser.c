@@ -60,6 +60,9 @@ void parse_token_one_by_one(char *str, char delimiter,
 }
 
 void parse_one_message(char *message, void *root) {
+	/*
+	 * a.b:10|ms,20|g,30|c
+	 */
 	char *head = NULL;
 	char *body = NULL;
 	char *sep = strchr(message, HEAD_SEP);
@@ -91,7 +94,7 @@ void parse_body(char *body, void *acct) {
 
 void parse_body_part(char *part, void *arg) {
 	/*
-	 * a.b:10|ms|@0.1 or a.b:10|ms
+	 * 10|ms|@0.1 or 10|ms
 	 */
 	if (part == NULL || arg == NULL ) {
 		return;
@@ -102,8 +105,6 @@ void parse_body_part(char *part, void *arg) {
 	char *type = NULL;
 	char *sample_rate = NULL;
 	char *sep = NULL;
-	char *error = NULL;
-	double d_sample_rate = 1;
 
 	value = part;
 	sep = strchr(part, MTD_SEP);
@@ -129,19 +130,10 @@ void parse_body_part(char *part, void *arg) {
 			}
 			if (*(sep + 1) == SAMPLE_RATE_MARK) {
 				sample_rate = sep + 2;
-				errno = 0;
-				d_sample_rate = strtod(sample_rate, &error);
-				if (errno != 0) {
-					log_warning("Error %s converting %s to double", error, sample_rate);
-					return;
-				}
-				if (d_sample_rate < rand() * 1.0 / RAND_MAX) {
-					return;
-				}
 			}
 		}
 	}
-	save(value, type, acct);
+	save(value, type, sample_rate, acct);
 }
 
 Account *get_new_account() {
@@ -175,7 +167,7 @@ SavingValue get_new_savingvalue() {
 	return sv;
 }
 
-void save(char *value, char *type, Account *acct) {
+void save(char *value, char *type, char *sample_rate, Account *acct) {
 	if (value == NULL || type == NULL || acct == NULL ) {
 		log_warning("Bad input value=%s, type=%s, account %d", value, type, acct == NULL );
 		return;
@@ -183,8 +175,11 @@ void save(char *value, char *type, Account *acct) {
 	log_info("Saving value %s of type %s", value, type);
 	int i;
 	int len = 0;
+	int vlen = 0;
+	int slen = 0;
 	int is_delete = 0;
 	long int l_value = 1;
+	double d_sample_rate = 1;
 	char *error;
 
 	errno = 0;
@@ -197,6 +192,15 @@ void save(char *value, char *type, Account *acct) {
 				log_warning("Error %s converting %s to long", error, value);
 				return;
 			}
+		}
+		if (sample_rate != NULL){
+			errno = 0;
+			d_sample_rate = strtod(sample_rate, &error);
+			if (errno != 0) {
+				log_warning("Error %s converting %s to double", error, sample_rate);
+				return;
+			}
+			l_value = l_value*(int)(1/d_sample_rate);
 		}
 	}
 	for (i = 0; i < NUM_METHODS; i++) {
@@ -218,7 +222,12 @@ void save(char *value, char *type, Account *acct) {
 		saving->value.iValue = 0;
 		return;
 	}
-	len = strlen(value);
+	vlen = strlen(value);
+	len = vlen;
+	if (sample_rate != NULL){
+		slen = strlen(sample_rate);
+		len += ((slen)+1);
+	}
 	switch (accum_method) {
 	case append:
 		if (saving->value.sValue == NULL ) {
@@ -227,7 +236,13 @@ void save(char *value, char *type, Account *acct) {
 		}
 		if (STR_SAVING_SIZE - (saving->cur_pos) > len + 1) {
 			strcpy(&(saving->value.sValue[saving->cur_pos]), value);
-			saving->cur_pos += len;
+			saving->cur_pos += vlen;
+			if (sample_rate != NULL){
+				saving->value.sValue[saving->cur_pos] = SAMPLE_RATE_MARK;
+				saving->cur_pos ++;
+				strcpy(&(saving->value.sValue[saving->cur_pos]), sample_rate);
+				saving->cur_pos += slen;
+			}
 			saving->value.sValue[saving->cur_pos] = STORE_SEP;
 			saving->cur_pos++;
 			saving->value.sValue[saving->cur_pos] = '\0';
@@ -266,6 +281,7 @@ PointerContainer *withdraw(Node *root, const int size_limit) {
 	Saving *saving = NULL;
 	ACCUM_METHOD accum_method;
 	int writer_pos = 0;
+	char append_str_search_terms[] = {STORE_SEP, SAMPLE_RATE_MARK, '\0'};
 
 	char *ccur = NULL;
 	int icur = 0;
@@ -330,7 +346,7 @@ PointerContainer *withdraw(Node *root, const int size_limit) {
 					bcur = 0;
 					strcpy(&buffer[bcur], label);
 					bcur += label_len;
-					delta = strcspn(&ccur[icur], &STORE_SEP);
+					delta = strcspn(&ccur[icur], append_str_search_terms);
 					if (strcmp(type, M) != 0) {
 						buffer[bcur] = ':';
 						bcur++;
@@ -340,6 +356,17 @@ PointerContainer *withdraw(Node *root, const int size_limit) {
 						bcur++;
 						strcpy(&buffer[bcur], type);
 						bcur += strlen(type);
+					}
+					if (ccur[icur+delta] == SAMPLE_RATE_MARK){
+						// This data point has sample rate specified
+						buffer[bcur] = MTD_SEP;
+						bcur++;
+						buffer[bcur] = SAMPLE_RATE_MARK;
+						bcur++;
+						icur += (delta + 1);
+						delta = strcspn(&ccur[icur], &STORE_SEP);
+						strncpy(&buffer[bcur], &ccur[icur], delta);
+						bcur += delta;
 					}
 					icur += (delta + 1);
 					buffer[bcur] = MSG_SEP;
@@ -406,13 +433,13 @@ void continously_write_to_tail(PointerContainer **head, PointerContainer **tail,
 	if ((*tail) == NULL ) {
 		(*tail) = get_new_container(NULL, label );
 		if((*head) == NULL) {
-            *head = *tail;
+			*head = *tail;
 		}
 	}
 	if (content_len + (*pos) >= size_limit || strcmp((*tail)->label, label) != 0) {
 		(*tail)->next = get_new_container(NULL, label );
 		if((*head) == NULL) {
-            *head = *tail;
+			*head = *tail;
 		}
 		(*tail) = (*tail)->next;
 	}
