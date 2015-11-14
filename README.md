@@ -1,7 +1,7 @@
 Bank
 ====
 
-Statsd and Metricsd frontend for UDP packets aggregation
+Statsd and Metricsd frontend for UDP packets aggregation. Please note, that this project is now obsolete. Please use https://github.com/hulu/statsd-aggregator instead.
 
 Concept
 -------
